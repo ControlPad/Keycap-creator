@@ -10,6 +10,9 @@ interface Generate3MFParams {
   depth: number;
   scale: number;
   rotation: number;
+  // Vertical offset of the inlay along Z (mm). + raises it above the keycap
+  // top surface, - sinks it deeper. X/Y stay centered.
+  offsetZ: number;
 }
 
 // Load the keycap STL and apply the same centering + 180° X rotation the viewer
@@ -37,6 +40,7 @@ export async function generateKeycap3MF({
   depth,
   scale,
   rotation,
+  offsetZ,
 }: Generate3MFParams): Promise<Blob> {
   // Always add 0.1 so the SVG sits slightly inside the keycap (matches viewer).
   const extrudeDepth = depth + 0.1;
@@ -50,7 +54,7 @@ export async function generateKeycap3MF({
     rotation,
     x: 0,
     y: 0,
-    z: topZ - 0.0905,
+    z: topZ - 0.0905 + offsetZ,
   });
 
   const engravedBody = csgSubtract(bodyGeo, svgGeo);

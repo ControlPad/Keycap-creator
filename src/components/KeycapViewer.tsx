@@ -14,6 +14,7 @@ interface KeycapViewerProps {
   scale: number;
   rotation: number;
   depth: number;
+  offsetZ: number;
 }
 
 function KeycapBody({ stlUrl, baseColor }: { stlUrl: string; baseColor: string }) {
@@ -49,6 +50,7 @@ function SvgOverlay({
   scale: userScale,
   rotation: userRotation,
   depth,
+  offsetZ,
 }: {
   svgContent: string;
   symbolColor: string;
@@ -56,6 +58,7 @@ function SvgOverlay({
   scale: number;
   rotation: number;
   depth: number;
+  offsetZ: number;
 }) {
   const stlGeometry = useLoader(STLLoader, stlUrl);
   const [meshGroup, setMeshGroup] = useState<THREE.Group | null>(null);
@@ -222,7 +225,7 @@ function SvgOverlay({
       merged.applyMatrix4(new THREE.Matrix4().makeRotationZ((userRotation * Math.PI) / 180));
     }
 
-    merged.translate(0, 0, topZ - 0.0905);
+    merged.translate(0, 0, topZ - 0.0905 + offsetZ);
     merged.computeVertexNormals();
 
     const mesh = new THREE.Mesh(
@@ -247,7 +250,7 @@ function SvgOverlay({
         }
       });
     };
-  }, [svgContent, symbolColor, userScale, userRotation, depth, topZ]);
+  }, [svgContent, symbolColor, userScale, userRotation, depth, offsetZ, topZ]);
 
   if (!meshGroup) return null;
   return <primitive object={meshGroup} />;
@@ -289,7 +292,7 @@ function PanLimitedControls() {
   );
 }
 
-function Scene({ stlUrl, baseColor, symbolColor, svgContent, scale, rotation, depth }: KeycapViewerProps & { stlUrl: string }) {
+function Scene({ stlUrl, baseColor, symbolColor, svgContent, scale, rotation, depth, offsetZ }: KeycapViewerProps & { stlUrl: string }) {
   const { camera } = useThree();
 
   useEffect(() => {
@@ -312,6 +315,7 @@ function Scene({ stlUrl, baseColor, symbolColor, svgContent, scale, rotation, de
           scale={scale}
           rotation={rotation}
           depth={depth}
+          offsetZ={offsetZ}
         />
       )}
       <group position={[0, 0, -4.6]} rotation={[Math.PI / 2, 0, 0]}>

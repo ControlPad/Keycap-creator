@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, type ChangeEvent } from 'react';
 import KeycapViewer from './components/KeycapViewer';
 import SymbolBrowser from './components/SymbolBrowser';
 import ColorSwatchPicker from './components/ColorSwatchPicker';
@@ -7,7 +7,6 @@ import { generateKeycap3MF, downloadBlob } from './lib/threemf/generate3mf';
 import {
   COLORS,
   ICON_VARIANTS,
-  BULK_PRICING_TIERS,
   DEFAULT_BASE_COLOR,
   DEFAULT_SYMBOL_COLOR,
   PRODUCT_NAME,
@@ -18,8 +17,17 @@ import {
 
 const PREMIUM_BADGE = 'Bessere Qualität';
 
-function formatEur(value: number): string {
-  return value.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+// Shape of the exported/imported configuration file.
+interface KeycapConfigFile {
+  version: 1;
+  baseColor: string;
+  symbolColor: string;
+  symbolName: string | null;
+  svgContent: string | null;
+  scale: number;
+  rotation: number;
+  depth: number;
+  offsetZ: number;
 }
 
 function badgeOf(hex: string): string | null {
@@ -39,6 +47,7 @@ const SLIDERS = [
   { key: 'scale', label: 'Skalierung', min: 0.1, max: 3, step: 0.05 },
   { key: 'rotation', label: 'Rotation', min: -180, max: 180, step: 5 },
   { key: 'depth', label: 'Höhe', min: 0, max: 2.0, step: 0.1 },
+  { key: 'offsetZ', label: 'Z-Position', min: -2, max: 2, step: 0.05 },
 ] as const;
 
 export default function App() {
@@ -49,19 +58,65 @@ export default function App() {
   const [scale, setScale] = useState(1.0);
   const [rotation, setRotation] = useState(0);
   const [depth, setDepth] = useState(0);
+  const [offsetZ, setOffsetZ] = useState(0);
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const configInputRef = useRef<HTMLInputElement>(null);
 
   const handleSymbolSelect = useCallback((name: string, svg: string) => {
     setSelectedSymbolName(name);
     setSvgContent(svg);
   }, []);
 
+  // Export the current configuration as a JSON file (includes the SVG so custom
+  // uploads survive a round-trip). Re-importable via handleImportConfig.
+  function handleExportConfig() {
+    const config: KeycapConfigFile = {
+      version: 1,
+      baseColor,
+      symbolColor,
+      symbolName: selectedSymbolName,
+      svgContent,
+      scale,
+      rotation,
+      depth,
+      offsetZ,
+    };
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    const safeName = (selectedSymbolName ?? 'keycap').replace(/[^a-z0-9-]/gi, '_');
+    downloadBlob(blob, `keycap-${safeName}.json`);
+  }
+
+  function handleImportConfig(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const cfg = JSON.parse(reader.result as string) as Partial<KeycapConfigFile>;
+        if (typeof cfg.baseColor === 'string') setBaseColor(cfg.baseColor);
+        if (typeof cfg.symbolColor === 'string') setSymbolColor(cfg.symbolColor);
+        setSelectedSymbolName(cfg.symbolName ?? null);
+        setSvgContent(cfg.svgContent ?? null);
+        if (typeof cfg.scale === 'number') setScale(cfg.scale);
+        if (typeof cfg.rotation === 'number') setRotation(cfg.rotation);
+        if (typeof cfg.depth === 'number') setDepth(cfg.depth);
+        if (typeof cfg.offsetZ === 'number') setOffsetZ(cfg.offsetZ);
+        setExportError(null);
+      } catch {
+        setExportError('Konfigurationsdatei konnte nicht gelesen werden.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }
+
   const sliderState: Record<string, [number, (v: number) => void]> = {
     scale: [scale, setScale],
     rotation: [rotation, setRotation],
     depth: [depth, setDepth],
+    offsetZ: [offsetZ, setOffsetZ],
   };
 
   // Keep base + symbol on the same quality tier (matches original configurator).
@@ -87,7 +142,7 @@ export default function App() {
     setExporting(true);
     setExportError(null);
     try {
-      const blob = await generateKeycap3MF({ stlUrl: STL_URL, svg: svgContent, depth, scale, rotation });
+      const blob = await generateKeycap3MF({ stlUrl: STL_URL, svg: svgContent, depth, scale, rotation, offsetZ });
       const safeName = (selectedSymbolName ?? 'keycap').replace(/[^a-z0-9-]/gi, '_');
       downloadBlob(blob, `keycap-${safeName}.3mf`);
     } catch (err) {
@@ -96,9 +151,6 @@ export default function App() {
       setExporting(false);
     }
   }
-
-  const minUnitPrice = Math.min(...BULK_PRICING_TIERS.map((t) => parseFloat(t.price) / t.min_qty));
-  const minBulkQty = Math.min(...BULK_PRICING_TIERS.filter((t) => t.min_qty > 1).map((t) => t.min_qty));
 
   return (
     <div className="min-h-screen bg-page-bg text-gray-900 dark:bg-page-bg-dark dark:text-gray-100">
@@ -121,6 +173,7 @@ export default function App() {
               scale={scale}
               rotation={rotation}
               depth={depth}
+              offsetZ={offsetZ}
             />
           </div>
 
@@ -180,12 +233,31 @@ export default function App() {
               selectedLabel={COLORS.find((c) => c.hex === symbolColor)?.name}
             />
 
-            <div className="text-sm text-gray-700 dark:text-gray-300">
-              <span className="font-semibold">ab {formatEur(minUnitPrice)} / Stück</span>
-              <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
-                (Mengenrabatt ab {minBulkQty} Stück)
-              </span>
+            {/* Save / load the current configuration as a JSON file */}
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => configInputRef.current?.click()}
+              >
+                Konfiguration importieren
+              </Button>
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={handleExportConfig}
+                disabled={!selectedSymbolName}
+              >
+                Konfiguration exportieren
+              </Button>
             </div>
+            <input
+              ref={configInputRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={handleImportConfig}
+              className="hidden"
+            />
 
             <Button className="w-full" onClick={handleExport} disabled={!selectedSymbolName || !svgContent || exporting}>
               {exporting ? '3MF wird erstellt…' : '.3MF exportieren'}
